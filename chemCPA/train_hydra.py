@@ -9,15 +9,16 @@ import numpy as np
 
 from chemCPA.data.data import PerturbationDataModule, load_dataset_splits
 from chemCPA.paths import WB_DIR
-from lightning_module import ChemCPA  # your LightningModule containing ComPert usage
+from chemCPA.lightning_module import ChemCPA  # your LightningModule containing ComPert usage
 
 
-@hydra.main(version_base=None, config_path="../config/", config_name="main")
-def main(args):
-    OmegaConf.set_struct(args, False) 
+def train_model(args, datasets, dataset, checkpoint_dir, logger=None):
+    """
+    Train the ChemCPA model and return the path to its last checkpoint. 
+    `dataset` and `datasets` are the are the outputs of `load_dataset_splits(..., return_dataset=True)`
+    """
+    OmegaConf.set_struct(args, False)  # Allow dynamic assignment of new keys
 
-    data_params = args["dataset"]
-    datasets, dataset = load_dataset_splits(**data_params, return_dataset=True)
     dm = PerturbationDataModule(datasplits=datasets, train_bs=args["model"]["hparams"]["batch_size"])
     dataset_config = {
         "num_genes": datasets["training"].num_genes,
@@ -146,24 +147,40 @@ def main(args):
     else:
         print(f"Warning: No pretrained hash found for model")
 
-    wandb_logger = WandbLogger(**args["wandb"], save_dir=WB_DIR)
-    run_id = wandb_logger.experiment.id
-
-    checkpoint_callback = ModelCheckpoint(dirpath=Path(args["training"]["save_dir"]) / run_id, save_last=True)
-    lr_monitor = LearningRateMonitor(logging_interval="step")
+    
+    checkpoint_callback = ModelCheckpoint(dirpath=checkpoint_dir, save_last=True)
+    callbacks = [checkpoint_callback]
+    if logger is not None:
+        # LearningRateMonitor raises an error when the Trainer has no logger.
+        callbacks.append(LearningRateMonitor(logging_interval="step"))
 
     trainer = L.Trainer(
         accelerator="cuda",
         devices=1,
-        logger=wandb_logger,
+        logger=logger if logger is not None else False,
         max_epochs=args["training"]["num_epochs"],
         max_time=args["training"]["max_minutes"],
-        callbacks=[checkpoint_callback, lr_monitor],
+        callbacks=callbacks,
         check_val_every_n_epoch=args["training"]["checkpoint_freq"],
     )
 
     trainer.fit(model, datamodule=dm)
+    return Path(checkpoint_dir) / "last.ckpt"
 
+
+@hydra.main(version_base=None, config_path="../config/", config_name="main")
+def main(args):
+    # 1. Load the data
+    datasets, dataset = load_dataset_splits(**args["dataset"], return_dataset=True)
+
+    # 2. Create the W&B logger
+    wandb_logger = WandbLogger(**args["wand"], save_dir=WB_DIR)
+
+    # 3. Choose the checkpoint folder
+    checkpoint_dir = Path(args["training"]["save_dir"]) / wandb_logger.experiment.id
+
+    # 4. Train the model
+    train_model(args, datasets, dataset, checkpoint_dir, logger=wandb_logger)
 
 if __name__ == "__main__":
     main()
