@@ -9,65 +9,30 @@ from chemCPA.paths import EMBEDDING_DIR
 
 def _check_smiles_availability(smiles: List[str], df: pd.DataFrame) -> tuple[set, set, list]:
     """
-    Check which SMILES are present in the DataFrame and which are missing.
-    
-    Args:
-        smiles: List of SMILES strings to check
-        df: DataFrame containing embeddings with SMILES as index
-        
-    Returns:
-        Tuple containing:
-        - set of present SMILES
-        - set of missing SMILES
-        - list of embeddings (with zeros for missing SMILES)
-    """
-    present_smiles = set(smiles) & set(df.index)
-    missing_smiles = set(smiles) - present_smiles
-    
-    print(f"Matching SMILES: {len(present_smiles)} out of {len(smiles)}")
-    print(f"Missing SMILES: {len(missing_smiles)}")
-    
-    if len(missing_smiles) > 0 and len(missing_smiles) <= 10:
-        print("Missing SMILES:")
-        for s in missing_smiles:
-            print(f"  {s}")
-    elif len(missing_smiles) > 10:
-        print("More than 10 SMILES are missing. First 10:")
-        for s in list(missing_smiles)[:10]:
-            print(f"  {s}")
+    Return the embedding of each SMILES in the order given.
+    Raises a ValueError if the table has duplicate SMILES or lacks a requested SMILES. 
 
-    if len(missing_smiles) > 0:
-        print("Using zero vectors for missing SMILES.")
+    Args:
+        smiles: List of SMILES string to look up
+        df: Dataframe with embeddings and SMILES, containing SMILES as the index
     
-    # Create embeddings, using zeros for missing SMILES
-    emb_list = []
-    print(f"DataFrame shape: {df.shape}")
+    Returns:
+        tuple containing:
+            1. set of present SMILES
+            2. set of missing SMILES (always empty)
+            3. List of embeddings
+    """
+    if df.index.has_duplicates:
+        duplicates = df.index[df.index.duplicated()].unique().tolist()
+        raise ValueError(f"Duplicate SMILES found in the embedding table: {duplicates}")
+
+    missing_smiles = set(smiles) - set(df.index)
+    if missing_smiles:
+        raise ValueError(f"Missing SMILES in the embedding table: {missing_smiles}")
+
+    emb_list = [df.loc[smile].values for smile in smiles]
+    return set(df.index), missing_smiles, emb_list
     
-    # Add shape verification
-    shapes = set()
-    for i, s in enumerate(smiles):
-        if s in df.index:
-            embedding = df.loc[s].values
-            shapes.add(embedding.shape)
-            if len(shapes) > 1:
-                print(f"WARNING: Inconsistent shapes detected at index {i}")
-                print(f"Current shapes found: {shapes}")
-                print(f"Problematic SMILE: {s}")
-                print(f"Current embedding shape: {embedding.shape}")
-            emb_list.append(embedding)
-        else:
-            zero_vec = np.zeros(df.shape[1])
-            shapes.add(zero_vec.shape)
-            emb_list.append(zero_vec)
-    
-    print(f"All unique shapes found: {shapes}")
-    
-    # Verify each embedding individually
-    for i, emb in enumerate(emb_list):
-        if not isinstance(emb, np.ndarray):
-            print(f"Warning: embedding {i} is not a numpy array, it's a {type(emb)}") 
-            
-    return present_smiles, missing_smiles, emb_list
 
 
 def get_chemical_representation(
